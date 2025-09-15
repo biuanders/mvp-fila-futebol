@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Fila Futebol - Debug</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="p-6 bg-gray-100">
+  <h1 class="text-2xl font-bold mb-4">⚽ Futebol Hawai</h1>
+
+  <div class="mb-4">
+    <input id="nomeJogador" placeholder="Nome do jogador" class="border p-2 rounded" />
+    <button id="btn-adicionar" class="bg-blue-500 text-white px-4 py-2 rounded ml-2">Adicionar</button>
+    <button id="btn-reset" class="bg-red-600 text-white px-4 py-2 rounded ml-2">Resetar Campeonato</button>
+  </div>
+
+  <h2 class="text-lg font-semibold">Jogadores</h2>
+  <ul id="listaJogadores" class="mb-4 list-disc pl-6"></ul>
+
+  <button id="btn-partida" class="bg-green-600 text-white px-4 py-2 rounded">Iniciar Partida</button>
+
+  <h2 class="mt-6 text-lg font-semibold">Partida Atual</h2>
+  <div id="partidaAtual" class="mt-2 p-4 border rounded bg-white"></div>
+
+  <h2 class="mt-6 text-lg font-semibold">Histórico de Partidas</h2>
+  <div id="historicoPartidas" class="mt-2 space-y-2"></div>
+
+  <script>
+    const API = "http://localhost:4000";
+
+    async function carregarJogadores() {
+      try {
+        const res = await fetch(`${API}/jogadores`);
+        const jogadores = await res.json();
+        document.getElementById("listaJogadores").innerHTML =
+          (jogadores || []).map(j => `
+            <li>
+              <label class="flex items-center gap-2">
+                <input type="checkbox" class="chk-ativo" data-id="${j.id}" ${j.ativo ? "checked" : ""} />
+                ${escapeHtml(j.nome)} (jogos: ${j.jogos}, vitórias: ${j.vitorias || 0})
+              </label>
+            </li>
+          `).join("");
+      } catch (err) {
+        console.error('Erro ao carregar jogadores:', err);
+      }
+    }
+
+    async function adicionarJogador() {
+      const nome = document.getElementById("nomeJogador").value.trim();
+      if (!nome) return alert("Digite um nome!");
+      const res = await fetch(`${API}/jogadores`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nome })
+      });
+      await res.json();
+      document.getElementById("nomeJogador").value = "";
+      await carregarJogadores();
+    }
+
+    async function iniciarPartida() {
+      const res = await fetch(`${API}/partida`, { method: "POST" });
+      const partida = await res.json();
+      if (partida.message || partida.error) {
+        document.getElementById("partidaAtual").innerHTML = `<p class="text-red-600">${partida.message || partida.error}</p>`;
+        return;
+      }
+      mostrarPartidaAtual(partida);
+      await carregarHistorico();
+    }
+
+    async function registrarResultado(partidaId, vencedor) {
+      await fetch(`${API}/resultado`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: partidaId, vencedor })
+      });
+      await carregarJogadores();
+      await carregarHistorico();
+      setTimeout(iniciarPartida, 300);
+    }
+
+    async function carregarHistorico() {
+      const res = await fetch(`${API}/partidas`);
+      const partidas = await res.json();
+      document.getElementById("historicoPartidas").innerHTML = (partidas || []).map(p => `
+        <div class="p-2 border rounded bg-gray-50">
+          <p><strong>Partida ${escapeHtml(String(p.id))}</strong></p>
+          <p>Time A: ${escapeHtml(p.timeA.map(j => j.nome).join(", "))}</p>
+          <p>Time B: ${escapeHtml(p.timeB.map(j => j.nome).join(", "))}</p>
+          <p><strong>Vencedor:</strong> ${p.vencedor ? "Time " + escapeHtml(p.vencedor) : "Ainda jogando"}</p>
+        </div>
+      `).join("");
+    }
+
+    function mostrarPartidaAtual(partida) {
+      const cont = document.getElementById('partidaAtual');
+      cont.innerHTML = `
+        <p><strong>Time A:</strong> ${escapeHtml(partida.timeA.map(j => j.nome).join(", "))}</p>
+        <p><strong>Time B:</strong> ${escapeHtml(partida.timeB.map(j => j.nome).join(", "))}</p>
+        <div class="mt-2">
+          <button data-partida-id="${escapeHtml(partida.id)}" data-vencedor="A" class="btn-result bg-blue-500 text-white px-2 py-1 rounded">Vitória Time A</button>
+          <button data-partida-id="${escapeHtml(partida.id)}" data-vencedor="B" class="btn-result bg-red-500 text-white px-2 py-1 rounded ml-2">Vitória Time B</button>
+        </div>
+      `;
+    }
+
+    // delegação para botões de resultado
+    document.addEventListener('click', (ev) => {
+      const t = ev.target;
+      if (t && t.classList && t.classList.contains('btn-result')) {
+        const pid = t.getAttribute('data-partida-id');
+        const v = t.getAttribute('data-vencedor');
+        if (pid && v) registrarResultado(pid, v);
+      }
+    });
+
+    // delegação para checkboxes ativo/inativo
+    document.addEventListener('change', async (ev) => {
+      const t = ev.target;
+      if (t && t.classList && t.classList.contains('chk-ativo')) {
+        const id = t.getAttribute('data-id');
+        const ativo = t.checked;
+        await fetch(`${API}/jogadores/${id}/ativo`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ativo })
+        });
+        await carregarJogadores();
+      }
+    });
+
+    // ligar botões quando DOM estiver pronto
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('btn-adicionar').addEventListener('click', adicionarJogador);
+      document.getElementById('btn-partida').addEventListener('click', iniciarPartida);
+      document.getElementById('btn-reset').addEventListener('click', async () => {
+        if (!confirm('Resetar campeonato?')) return;
+        await fetch(`${API}/reset`, { method: 'POST' });
+        document.getElementById('partidaAtual').innerHTML = '';
+        await carregarJogadores();
+        await carregarHistorico();
+      });
+
+      carregarJogadores();
+      carregarHistorico();
+    });
+
+    function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+  </script>
+</body>
+</html>

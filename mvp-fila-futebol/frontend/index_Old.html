@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>⚽ Futebol Hawai</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .highlight { background-color: #ffcccc; }
+    .inactive { color: #aaa; }
+  </style>
+</head>
+<body class="p-6 bg-gray-100">
+  <h1 class="text-3xl font-bold mb-6 text-center">⚽ Futebol Hawai</h1>
+
+  <!-- Tabs -->
+  <div class="flex justify-center mb-6">
+    <button id="tabCadastro" class="px-6 py-2 bg-blue-500 text-white rounded-l">Cadastro</button>
+    <button id="tabCampeonato" class="px-6 py-2 bg-green-600 text-white rounded-r">Campeonato</button>
+  </div>
+
+  <!-- Página de Cadastro -->
+  <div id="cadastroPage" class="hidden">
+    <h2 class="text-xl font-semibold mb-4">Cadastro de Jogadores</h2>
+
+    <div class="mb-4">
+      <input id="nomeJogador" placeholder="Nome do jogador" class="border p-2 rounded" />
+      <button id="btn-adicionar" class="bg-blue-500 text-white px-4 py-2 rounded ml-2">Adicionar</button>
+      <button id="btn-reset" class="bg-red-600 text-white px-4 py-2 rounded ml-2">Resetar Campeonato</button>
+    </div>
+
+    <div class="mb-4">
+      <label for="selectJogador" class="font-semibold">Adicionar jogador já cadastrado:</label>
+      <select id="selectJogador" class="border p-2 rounded ml-2">
+        <option value="">-- selecione --</option>
+      </select>
+      <button id="btn-habilitar" class="bg-green-600 text-white px-4 py-2 rounded ml-2">Habilitar</button>
+    </div>
+
+    <h2 class="text-lg font-semibold">Jogadores no Campeonato</h2>
+    <ul id="listaJogadores" class="mb-4 list-disc pl-6"></ul>
+  </div>
+
+  <!-- Página de Campeonato -->
+  <div id="campeonatoPage" class="hidden">
+    <div class="flex gap-6">
+      <!-- Coluna esquerda -->
+      <div class="w-1/2">
+        <button id="btn-partida" class="bg-green-600 text-white px-4 py-2 rounded mb-4">Iniciar Partida</button>
+
+        <h2 class="text-lg font-semibold">Partida Atual</h2>
+        <div id="partidaAtual" class="mt-2 p-4 border rounded bg-white"></div>
+
+        <h2 class="mt-6 text-lg font-semibold">Histórico de Partidas</h2>
+        <div id="historicoPartidas" class="mt-2 space-y-2"></div>
+      </div>
+
+      <!-- Coluna direita -->
+      <div class="w-1/2">
+        <h2 class="text-lg font-semibold mb-2">Tabela</h2>
+        <div class="overflow-x-auto">
+          <table class="border border-gray-400 w-full text-center text-sm" id="tabela">
+            <thead>
+              <tr>
+                <th class="border border-gray-400 px-2">Jogador</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = "http://localhost:4000";
+    let jogadoresCache = [];
+    let partidasCache = [];
+
+    // ---------- Tabs ----------
+    function mostrarTab(tab) {
+      document.getElementById("cadastroPage").classList.add("hidden");
+      document.getElementById("campeonatoPage").classList.add("hidden");
+      if (tab === "cadastro") {
+        document.getElementById("cadastroPage").classList.remove("hidden");
+      } else {
+        document.getElementById("campeonatoPage").classList.remove("hidden");
+      }
+    }
+
+    document.getElementById("tabCadastro").addEventListener("click", () => mostrarTab("cadastro"));
+    document.getElementById("tabCampeonato").addEventListener("click", () => mostrarTab("campeonato"));
+
+    // ---------- Funções ----------
+    async function carregarJogadores() {
+      const res = await fetch(`${API}/jogadores`);
+      jogadoresCache = await res.json();
+
+      // lista de jogadores habilitados no campeonato
+      document.getElementById("listaJogadores").innerHTML = jogadoresCache
+        .filter(j => j.ativo)
+        .map(j => `<li>${escapeHtml(j.nome)} (jogos: ${j.jogos}, vitórias: ${j.vitorias})</li>`)
+        .join("");
+
+      // popular o select
+      const sel = document.getElementById("selectJogador");
+      sel.innerHTML = `<option value="">-- selecione --</option>` +
+        jogadoresCache.map(j => `<option value="${j.id}">${escapeHtml(j.nome)}</option>`).join("");
+
+      atualizarTabela();
+    }
+
+    async function adicionarJogador() {
+      const nome = document.getElementById("nomeJogador").value.trim();
+      if (!nome) return alert("Digite um nome!");
+      const res = await fetch(`${API}/jogadores`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nome })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        return alert(err.error || "Erro ao adicionar jogador");
+      }
+      document.getElementById("nomeJogador").value = "";
+      await carregarJogadores();
+    }
+
+    async function habilitarJogador() {
+      const id = document.getElementById("selectJogador").value;
+      if (!id) return alert("Selecione um jogador");
+      await fetch(`${API}/jogadores/${id}/ativo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ativo: true })
+      });
+      await carregarJogadores();
+    }
+
+    async function iniciarPartida() {
+      const res = await fetch(`${API}/partida`, { method: "POST" });
+      const partida = await res.json();
+      if (partida.message || partida.error) {
+        document.getElementById("partidaAtual").innerHTML = `<p class="text-red-600">${partida.message || partida.error}</p>`;
+        return;
+      }
+      mostrarPartidaAtual(partida);
+      document.getElementById("btn-partida").style.display = "none";
+      await carregarHistorico();
+    }
+
+    async function registrarResultado(partidaId, vencedor) {
+      await fetch(`${API}/resultado`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: partidaId, vencedor })
+      });
+      await carregarJogadores();
+      await carregarHistorico();
+      document.getElementById("btn-partida").style.display = "inline-block";
+      setTimeout(iniciarPartida, 300);
+    }
+
+    async function carregarHistorico() {
+      const res = await fetch(`${API}/partidas`);
+      partidasCache = await res.json();
+      document.getElementById("historicoPartidas").innerHTML = partidasCache.map(p => `
+        <div class="p-2 border rounded bg-gray-50">
+          <p><strong>Partida ${escapeHtml(String(p.id))}</strong></p>
+          <p>Time A: ${escapeHtml(p.timeA.map(j => j.nome).join(", "))}</p>
+          <p>Time B: ${escapeHtml(p.timeB.map(j => j.nome).join(", "))}</p>
+          <p><strong>Vencedor:</strong> ${p.vencedor === "E" ? "Empate" : p.vencedor ? "Time " + escapeHtml(p.vencedor) : "Ainda jogando"}</p>
+        </div>
+      `).join("");
+      atualizarTabela();
+    }
+
+    function mostrarPartidaAtual(partida) {
+      const cont = document.getElementById('partidaAtual');
+      cont.innerHTML = `
+        <p><strong>Time A:</strong> ${escapeHtml(partida.timeA.map(j => j.nome).join(", "))}</p>
+        <p><strong>Time B:</strong> ${escapeHtml(partida.timeB.map(j => j.nome).join(", "))}</p>
+        <div class="mt-2">
+          <button data-partida-id="${escapeHtml(partida.id)}" data-vencedor="A" class="btn-result bg-blue-500 text-white px-2 py-1 rounded">Vitória Time A</button>
+          <button data-partida-id="${escapeHtml(partida.id)}" data-vencedor="B" class="btn-result bg-red-500 text-white px-2 py-1 rounded ml-2">Vitória Time B</button>
+          <button data-partida-id="${escapeHtml(partida.id)}" data-vencedor="E" class="btn-result bg-gray-600 text-white px-2 py-1 rounded ml-2">Empate</button>
+        </div>
+      `;
+    }
+
+    function atualizarTabela() {
+      if (!jogadoresCache || !partidasCache) return;
+      const thead = document.querySelector("#tabela thead tr");
+      const tbody = document.querySelector("#tabela tbody");
+
+      thead.innerHTML = `<th class="border border-gray-400 px-2">Jogador</th>`;
+      partidasCache.forEach(p => {
+        thead.innerHTML += `<th class="border border-gray-400 px-2">P${p.id}</th>`;
+      });
+
+      tbody.innerHTML = jogadoresCache.map(j => {
+        let row = `<tr><td class="border border-gray-400 px-2 ${j.ativo ? "" : "inactive"}">${escapeHtml(j.nome)}</td>`;
+        partidasCache.forEach((p, idx) => {
+          let mark = "";
+          if (p.timeA.some(x => x.id === j.id)) mark = "🟡";
+          if (p.timeB.some(x => x.id === j.id)) mark = "🔵";
+
+          let highlight = "";
+          if (idx > 0) {
+            const prev = partidasCache[idx - 1];
+            const emA1 = prev.timeA.some(x => x.id === j.id);
+            const emB1 = prev.timeB.some(x => x.id === j.id);
+            const emA2 = p.timeA.some(x => x.id === j.id);
+            const emB2 = p.timeB.some(x => x.id === j.id);
+            if ((emA1 && emA2) || (emB1 && emB2)) highlight = "highlight";
+          }
+
+          row += `<td class="border border-gray-400 px-2 ${highlight}">${mark}</td>`;
+        });
+        row += "</tr>";
+        return row;
+      }).join("");
+    }
+
+    // Eventos globais
+    document.addEventListener('click', async (ev) => {
+      const t = ev.target;
+      if (t.classList.contains('btn-result')) {
+        const pid = t.getAttribute('data-partida-id');
+        const v = t.getAttribute('data-vencedor');
+        if (pid && v) registrarResultado(pid, v);
+      }
+    });
+
+    // Inicialização
+    document.addEventListener('DOMContentLoaded', async () => {
+      document.getElementById('btn-adicionar').addEventListener('click', adicionarJogador);
+      document.getElementById('btn-habilitar').addEventListener('click', habilitarJogador);
+      document.getElementById('btn-partida').addEventListener('click', iniciarPartida);
+      document.getElementById('btn-reset').addEventListener('click', async () => {
+        if (!confirm('Resetar campeonato?')) return;
+        await fetch(`${API}/reset`, { method: 'POST' });
+        document.getElementById('partidaAtual').innerHTML = '';
+        document.getElementById("btn-partida").style.display = "inline-block";
+        await carregarJogadores();
+        await carregarHistorico();
+      });
+
+      await carregarJogadores();
+      await carregarHistorico();
+
+      mostrarTab("cadastro");
+    });
+
+    function escapeHtml(s){ 
+      return String(s).replace(/[&<>"']/g, m=>({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[m])); 
+    }
+  </script>
+</body>
+</html>

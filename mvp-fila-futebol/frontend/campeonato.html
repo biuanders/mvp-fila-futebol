@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Campeonato</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .highlight { background-color: #ffcccc; }
+    .inactive { color: #aaa; }
+  </style>
+</head>
+<body class="p-6 bg-gray-100 flex gap-6">
+  <!-- Coluna esquerda -->
+  <div class="w-1/2">
+    <h1 class="text-2xl font-bold mb-4">⚽ Campeonato</h1>
+
+    <div class="mb-4">
+      <select id="selectJogador" class="border p-2 rounded"></select>
+      <button id="btn-add-campeonato" class="bg-blue-500 text-white px-4 py-2 rounded ml-2">Adicionar ao Campeonato</button>
+      <button id="btn-reset" class="bg-red-600 text-white px-4 py-2 rounded ml-2">Resetar Campeonato</button>
+    </div>
+
+    <h2 class="text-lg font-semibold">Jogadores no Campeonato</h2>
+    <ul id="listaCampeonato" class="mb-4 list-disc pl-6"></ul>
+
+    <button id="btn-partida" class="bg-green-600 text-white px-4 py-2 rounded">Iniciar Partida</button>
+
+    <h2 class="mt-6 text-lg font-semibold">Partida Atual</h2>
+    <div id="partidaAtual" class="mt-2 p-4 border rounded bg-white"></div>
+
+    <h2 class="mt-6 text-lg font-semibold">Histórico de Partidas</h2>
+    <div id="historicoPartidas" class="mt-2 space-y-2"></div>
+  </div>
+
+  <!-- Coluna direita -->
+  <div class="w-1/2">
+    <h2 class="text-lg font-semibold mb-2">Tabela</h2>
+    <div class="overflow-x-auto">
+      <table class="border border-gray-400 w-full text-center text-sm" id="tabela">
+        <thead>
+          <tr>
+            <th class="border border-gray-400 px-2">Jogador</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const API = "http://localhost:4000";
+    let campeonatoCache = [];
+    let partidasCache = [];
+
+    async function carregarSelect() {
+      const res = await fetch(`${API}/jogadores`);
+      const jogadores = await res.json();
+      document.getElementById("selectJogador").innerHTML = jogadores.map(j => `<option value="${j.id}">${j.nome}</option>`).join("");
+    }
+
+    async function carregarCampeonato() {
+      const res = await fetch(`${API}/campeonato/jogadores`);
+      campeonatoCache = await res.json();
+      document.getElementById("listaCampeonato").innerHTML = campeonatoCache.map(j => `
+        <li>${j.nome} (jogos: ${j.jogos}, vitórias: ${j.vitorias})</li>
+      `).join("");
+      atualizarTabela();
+    }
+
+    async function adicionarAoCampeonato() {
+      const id = parseInt(document.getElementById("selectJogador").value);
+      if (!id) return;
+      const res = await fetch(`${API}/campeonato/jogadores`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id })
+      });
+      const data = await res.json();
+      if (!res.ok) return alert(data.error || "Erro");
+      carregarCampeonato();
+    }
+
+    async function iniciarPartida() {
+      const res = await fetch(`${API}/partidas/iniciar`, { method: "POST" });
+      const partida = await res.json();
+      if (partida.error) return alert(partida.error);
+      mostrarPartidaAtual(partida);
+      carregarHistorico();
+    }
+
+    async function registrarResultado(id, vencedor) {
+      await fetch(`${API}/partidas/resultado`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, vencedor })
+      });
+      await carregarCampeonato();
+      await carregarHistorico();
+      document.getElementById("partidaAtual").innerHTML = "";
+    }
+
+    async function carregarHistorico() {
+      const res = await fetch(`${API}/partidas`);
+      partidasCache = await res.json();
+      document.getElementById("historicoPartidas").innerHTML = partidasCache.map(p => `
+        <div class="p-2 border rounded bg-gray-50">
+          <p><strong>Partida ${p.id}</strong></p>
+          <p>Time A: ${p.timeA.map(j => j.nome).join(", ")}</p>
+          <p>Time B: ${p.timeB.map(j => j.nome).join(", ")}</p>
+          <p><strong>Vencedor:</strong> ${p.vencedor === "E" ? "Empate" : p.vencedor ? "Time " + p.vencedor : "Ainda jogando"}</p>
+        </div>
+      `).join("");
+      atualizarTabela();
+    }
+
+    function mostrarPartidaAtual(partida) {
+      const cont = document.getElementById("partidaAtual");
+      cont.innerHTML = `
+        <p><strong>Time A:</strong> ${partida.timeA.map(j => j.nome).join(", ")}</p>
+        <p><strong>Time B:</strong> ${partida.timeB.map(j => j.nome).join(", ")}</p>
+        <div class="mt-2">
+          <button onclick="registrarResultado(${partida.id}, 'A')" class="bg-blue-500 text-white px-2 py-1 rounded">Vitória Time A</button>
+          <button onclick="registrarResultado(${partida.id}, 'B')" class="bg-red-500 text-white px-2 py-1 rounded ml-2">Vitória Time B</button>
+          <button onclick="registrarResultado(${partida.id}, 'E')" class="bg-gray-600 text-white px-2 py-1 rounded ml-2">Empate</button>
+        </div>
+      `;
+    }
+
+    function atualizarTabela() {
+      if (!campeonatoCache || !partidasCache) return;
+      const thead = document.querySelector("#tabela thead tr");
+      const tbody = document.querySelector("#tabela tbody");
+
+      thead.innerHTML = `<th class="border border-gray-400 px-2">Jogador</th>`;
+      partidasCache.forEach(p => {
+        thead.innerHTML += `<th class="border border-gray-400 px-2">P${p.id}</th>`;
+      });
+
+      tbody.innerHTML = campeonatoCache.map(j => {
+        let row = `<tr><td class="border border-gray-400 px-2">${j.nome}</td>`;
+        partidasCache.forEach((p, idx) => {
+          let mark = "";
+          if (p.timeA.some(x => x.id === j.id)) mark = "🟡";
+          if (p.timeB.some(x => x.id === j.id)) mark = "🔵";
+
+          let highlight = "";
+          if (idx > 0) {
+            const prev = partidasCache[idx - 1];
+            const emA1 = prev.timeA.some(x => x.id === j.id);
+            const emB1 = prev.timeB.some(x => x.id === j.id);
+            const emA2 = p.timeA.some(x => x.id === j.id);
+            const emB2 = p.timeB.some(x => x.id === j.id);
+            if ((emA1 && emA2) || (emB1 && emB2)) highlight = "highlight";
+          }
+          row += `<td class="border border-gray-400 px-2 ${highlight}">${mark}</td>`;
+        });
+        row += "</tr>";
+        return row;
+      }).join("");
+    }
+
+    document.getElementById("btn-add-campeonato").addEventListener("click", adicionarAoCampeonato);
+    document.getElementById("btn-partida").addEventListener("click", iniciarPartida);
+    document.getElementById("btn-reset").addEventListener("click", async () => {
+      if (!confirm("Resetar campeonato?")) return;
+      await fetch(`${API}/reset`, { method: "POST" });
+      carregarCampeonato();
+      carregarHistorico();
+    });
+
+    document.addEventListener("DOMContentLoaded", () => {
+      carregarSelect();
+      carregarCampeonato();
+      carregarHistorico();
+    });
+  </script>
+</body>
+</html>
