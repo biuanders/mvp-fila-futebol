@@ -326,5 +326,5 @@ if (db.jogadores.length === 0) {
   }
 }
 
-const PORT = 4000;
-app.listen(PORT, () => console.log(`Backend rodando na porta ${PORT}`));
+const PORT = process.env.PORT || 4000;
+app.listen(PORT, () => console.log("Rodando na porta " + PORT));
